@@ -1,19 +1,20 @@
 package org.fossasia.openevent.fragments;
 
-import android.animation.ObjectAnimator;
 import android.annotation.TargetApi;
+import android.arch.lifecycle.ViewModelProviders;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
+import android.support.design.widget.CoordinatorLayout;
+import android.support.design.widget.Snackbar;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.widget.DividerItemDecoration;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.text.Html;
-import android.text.method.LinkMovementMethod;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -21,7 +22,11 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.LinearInterpolator;
+import android.view.animation.TranslateAnimation;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -29,35 +34,35 @@ import com.squareup.otto.Subscribe;
 
 import org.fossasia.openevent.OpenEventApp;
 import org.fossasia.openevent.R;
+import org.fossasia.openevent.listeners.BookmarkStatus;
+import org.fossasia.openevent.activities.MainActivity;
 import org.fossasia.openevent.activities.SearchActivity;
 import org.fossasia.openevent.adapters.GlobalSearchAdapter;
 import org.fossasia.openevent.adapters.SocialLinksListAdapter;
 import org.fossasia.openevent.data.Event;
-import org.fossasia.openevent.data.Session;
 import org.fossasia.openevent.data.extras.Copyright;
-import org.fossasia.openevent.data.extras.EventDates;
 import org.fossasia.openevent.data.extras.SocialLink;
 import org.fossasia.openevent.data.extras.SpeakersCall;
-import org.fossasia.openevent.dbutils.RealmDataRepository;
 import org.fossasia.openevent.events.BookmarkChangedEvent;
 import org.fossasia.openevent.events.EventLoadedEvent;
+import org.fossasia.openevent.listeners.OnBookmarkSelectedListener;
 import org.fossasia.openevent.utils.DateConverter;
+import org.fossasia.openevent.utils.SnackbarUtil;
 import org.fossasia.openevent.utils.Utils;
 import org.fossasia.openevent.utils.Views;
-import org.threeten.bp.format.DateTimeParseException;
+import org.fossasia.openevent.viewmodels.AboutFragmentViewModel;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import butterknife.BindView;
-import io.realm.RealmResults;
 import timber.log.Timber;
 
 /**
  * Created by harshita30 on 9/3/17.
  */
 
-public class AboutFragment extends BaseFragment {
+public class AboutFragment extends BaseFragment implements OnBookmarkSelectedListener {
 
     @BindView(R.id.welcomeMessage)
     protected TextView welcomeMessage;
@@ -83,17 +88,22 @@ public class AboutFragment extends BaseFragment {
     protected TextView bookmarkHeader;
     @BindView(R.id.event_details_header)
     protected TextView eventDetailsHeader;
+    @BindView(R.id.slidin_down_part)
+    protected LinearLayout slidinDownPart;
+    @BindView(R.id.coordinate_layout_about)
+    protected CoordinatorLayout coordinatorLayoutParent;
+
 
     private ArrayList<String> dateList = new ArrayList<>();
 
     private GlobalSearchAdapter bookMarksListAdapter;
     private SocialLinksListAdapter socialLinksListAdapter;
-    private RealmResults<Session> bookmarksResult;
+
     private List<Object> sessions = new ArrayList<>();
     private List<SocialLink> socialLinks = new ArrayList<>();
 
-    private RealmDataRepository realmRepo = RealmDataRepository.getDefaultInstance();
     private Event event;
+    private AboutFragmentViewModel aboutFragmentViewModel;
 
     @Override
     public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -102,6 +112,8 @@ public class AboutFragment extends BaseFragment {
 
         setUpBookmarksRecyclerView();
         setUpSocialLinksRecyclerView();
+
+        aboutFragmentViewModel = ViewModelProviders.of(this).get(AboutFragmentViewModel.class);
 
         return view;
     }
@@ -114,9 +126,10 @@ public class AboutFragment extends BaseFragment {
     @Override
     public void onViewCreated(View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-
-        event = realmRepo.getEvent();
-        event.addChangeListener(realmModel -> loadEvent(event));
+        aboutFragmentViewModel.getEvent().observe(this, eventData -> {
+            event = eventData;
+            loadEvent(event);
+        });
     }
 
     @Subscribe
@@ -127,6 +140,7 @@ public class AboutFragment extends BaseFragment {
     private void setUpBookmarksRecyclerView() {
         bookmarksRecyclerView.setVisibility(View.VISIBLE);
         bookMarksListAdapter = new GlobalSearchAdapter(sessions, getContext());
+        bookMarksListAdapter.setOnBookmarkSelectedListener(this);
         bookmarksRecyclerView.setAdapter(bookMarksListAdapter);
         bookmarksRecyclerView.addItemDecoration(new DividerItemDecoration(getContext(), DividerItemDecoration.VERTICAL));
         bookmarksRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
@@ -183,18 +197,33 @@ public class AboutFragment extends BaseFragment {
 
     @TargetApi(16)
     void collapseExpandTextView() {
+        //translation animation of event bar
+        TranslateAnimation eventBarDownDirection = new TranslateAnimation(0, 0, -eventDescription.getHeight(), 0);
+        eventBarDownDirection.setInterpolator(new LinearInterpolator());
+        eventBarDownDirection.setDuration(300);
+
+        TranslateAnimation eventBarUpDirection = new TranslateAnimation(0, 0, eventDescription.getHeight(), 0);
+        eventBarUpDirection.setInterpolator(new LinearInterpolator());
+        eventBarUpDirection.setDuration(300);
+
+        //fading in or out of content
+        AlphaAnimation contentAppear = new AlphaAnimation(0, 1);
+        AlphaAnimation contentDisappear = new AlphaAnimation(1, 0);
+
         if (eventDescription.getVisibility() == View.GONE) {
-            // it's collapsed - expand it
+            // it's collapsed - expand it.
+            slidinDownPart.startAnimation(eventBarDownDirection);
+            eventDescription.startAnimation(contentAppear);
             eventDescription.setVisibility(View.VISIBLE);
             descriptionImg.setImageResource(R.drawable.ic_expand_less_black_24dp);
+
         } else {
-            // it's expanded - collapse it
+            // it's expanded - collapse it.
+            slidinDownPart.startAnimation(eventBarUpDirection);
+            eventDescription.startAnimation(contentDisappear);
             eventDescription.setVisibility(View.GONE);
             descriptionImg.setImageResource(R.drawable.ic_expand_more_black_24dp);
         }
-
-        ObjectAnimator animation = ObjectAnimator.ofInt(eventDescription, "maxLines", eventDescription.getMaxLines());
-        animation.setDuration(200).start();
     }
 
     @Override
@@ -207,11 +236,15 @@ public class AboutFragment extends BaseFragment {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
 
-        switch (item.getItemId()){
+        switch (item.getItemId()) {
             case R.id.action_search_home:
                 startActivity(new Intent(getContext(), SearchActivity.class));
                 break;
             case R.id.action_ticket_home:
+                if (!event.isValid()) {
+                    Snackbar.make(getView(), R.string.info_not_available, Snackbar.LENGTH_SHORT).show();
+                    break;
+                }
                 Utils.setUpCustomTab(getContext(), event.getTicketUrl());
                 break;
             case R.id.action_display_copyright_dialog:
@@ -219,6 +252,10 @@ public class AboutFragment extends BaseFragment {
                 break;
             case R.id.action_display_speakers_call_dialog:
                 displaySpeakersCallInformation();
+                break;
+            case R.id.action_download_latest_data:
+                ((MainActivity) getActivity()).downloadData();
+                break;
             default:
                 //No option selected. Do Nothing..
         }
@@ -231,22 +268,25 @@ public class AboutFragment extends BaseFragment {
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.copyright_dialog, null);
         dialogBuilder.setView(dialogView).setPositiveButton("Back", (dialog, which) -> dialog.cancel());
-        Copyright copyright = event.getEventCopyright();
         TextView holder = (TextView) dialogView.findViewById(R.id.holder_textview);
         TextView licence = (TextView) dialogView.findViewById(R.id.licence);
         TextView licenceurl = (TextView) dialogView.findViewById(R.id.licence_url);
-
-        licence.setText(copyright.getLicence() + " " + String.valueOf(copyright.getYear()));
-        holder.setText(copyright.getHolder());
-        String linkedurl = String.format("<a href=\"%s\">" + copyright.getLicenceUrl() + "</a> ", copyright.getLicenceUrl());
-        licenceurl.setText(Html.fromHtml(linkedurl));
-        licenceurl.setMovementMethod(LinkMovementMethod.getInstance());
-        AlertDialog alertDialog = dialogBuilder.create();
-        alertDialog.show();
+        if (event.isValid() && event.getEventCopyright().isValid()) {
+            Copyright copyright = event.getEventCopyright();
+            licence.setText(copyright.getLicence() + " " + String.valueOf(copyright.getYear()));
+            holder.setText(copyright.getHolder());
+            String linkedurl = String.format("<a href=\"%s\">" + copyright.getLicenceUrl() + "</a> ", copyright.getLicenceUrl());
+            licenceurl.setText(Html.fromHtml(linkedurl));
+            licenceurl.setOnClickListener(view -> Utils.setUpCustomTab(getContext(), copyright.getLicenceUrl()));
+            AlertDialog alertDialog = dialogBuilder.create();
+            alertDialog.show();
+        } else {
+            Snackbar.make(getView(), R.string.info_not_available, Snackbar.LENGTH_SHORT).show();
+        }
     }
 
     private void displaySpeakersCallInformation() {
-        AlertDialog.Builder dialogBuilder  = new AlertDialog.Builder(getContext());
+        AlertDialog.Builder dialogBuilder = new AlertDialog.Builder(getContext());
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.speakers_call_dialog, null);
         TextView holder = (TextView) dialogView.findViewById(R.id.holder_textview);
@@ -254,23 +294,27 @@ public class AboutFragment extends BaseFragment {
         TextView fromDateOfEvent = (TextView) dialogView.findViewById(R.id.from_date_textview);
         TextView toDateOfEvent = (TextView) dialogView.findViewById(R.id.to_date_textview);
 
-        SpeakersCall speakersCall = event.getSpeakersCall();
-        holder.setText(event.getEventCopyright().getHolder());
-        String announcementString = Html.fromHtml(speakersCall.getAnnouncement()).toString();
-        announcement.setText(announcementString + "at " + event.getEmail());
-        int index = speakersCall.getStartsAt().indexOf("T");
-        toDateOfEvent.setText("To: " + speakersCall.getStartsAt().substring(0, index));
-        fromDateOfEvent.setText("From: " + speakersCall.getEndsAt().substring(0, index));
-        dialogBuilder.setView(dialogView).setNegativeButton("Back", (dialog, which) -> dialog.cancel());
-        dialogBuilder.setPositiveButton("Copy Email",
-                (dialog, which) -> {
-                    ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-                    ClipData clip = ClipData.newPlainText("Email", event.getEmail());
-                    clipboard.setPrimaryClip(clip);
-                    Toast.makeText(getContext().getApplicationContext(), "Email copied to clipboard", Toast.LENGTH_SHORT).show();
-                });
-        AlertDialog alertDialog = dialogBuilder.create();
-        alertDialog.show();
+        if (event.isValid() && event.getSpeakersCall().isValid()) {
+            SpeakersCall speakersCall = event.getSpeakersCall();
+            holder.setText(event.getEventCopyright().getHolder());
+            String announcementString = Html.fromHtml(speakersCall.getAnnouncement()).toString();
+            announcement.setText(announcementString + "at " + event.getEmail());
+            int index = speakersCall.getStartsAt().indexOf("T");
+            toDateOfEvent.setText("To: " + speakersCall.getStartsAt().substring(0, index));
+            fromDateOfEvent.setText("From: " + speakersCall.getEndsAt().substring(0, index));
+            dialogBuilder.setView(dialogView).setNegativeButton("Back", (dialog, which) -> dialog.cancel());
+            dialogBuilder.setPositiveButton("Copy Email",
+                    (dialog, which) -> {
+                        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                        ClipData clip = ClipData.newPlainText("Email", event.getEmail());
+                        clipboard.setPrimaryClip(clip);
+                        Toast.makeText(getContext().getApplicationContext(), "Email copied to clipboard", Toast.LENGTH_SHORT).show();
+                    });
+            AlertDialog alertDialog = dialogBuilder.create();
+            alertDialog.show();
+        } else {
+            Snackbar.make(getView(), R.string.info_not_available, Snackbar.LENGTH_SHORT).show();
+        }
     }
 
     @Subscribe
@@ -296,41 +340,19 @@ public class AboutFragment extends BaseFragment {
     }
 
     private void loadEventDates() {
-        dateList.clear();
-        RealmResults<EventDates> eventDates = realmRepo.getEventDatesSync();
-        for (EventDates eventDate : eventDates) {
-            dateList.add(eventDate.getDate());
-        }
+        this.dateList.clear();
+        this.dateList.addAll(aboutFragmentViewModel.getDateList());
     }
 
     private void loadData() {
         loadEventDates();
-
-        bookmarksResult = realmRepo.getBookMarkedSessions();
-        bookmarksResult.removeAllChangeListeners();
-        bookmarksResult.addChangeListener((bookmarked, orderedCollectionInnerChangeSet) -> {
-
+        aboutFragmentViewModel.getBookmarkedSessions().observe(this, sessionsList -> {
             sessions.clear();
-            for (String eventDate : dateList) {
-                boolean headerCheck = false;
-                for (Session bookmarkedSession : bookmarked) {
-                    if (bookmarkedSession.getStartDate().equals(eventDate)) {
-                        if (!headerCheck) {
-                            String headerDate = "Invalid";
-                            try {
-                                headerDate = DateConverter.formatDay(eventDate);
-                            } catch (DateTimeParseException e) {
-                                e.printStackTrace();
-                            }
-                            sessions.add(headerDate);
-                            headerCheck = true;
-                        }
-                        sessions.add(bookmarkedSession);
-                    }
-                }
-                bookMarksListAdapter.notifyDataSetChanged();
-                handleVisibility();
-            }
+            sessions.addAll(sessionsList);
+            bookMarksListAdapter = new GlobalSearchAdapter(sessions, getContext());
+            bookMarksListAdapter.setOnBookmarkSelectedListener(this);
+            bookmarksRecyclerView.setAdapter(bookMarksListAdapter);
+            handleVisibility();
         });
     }
 
@@ -344,9 +366,20 @@ public class AboutFragment extends BaseFragment {
     public void onStop() {
         super.onStop();
         OpenEventApp.getEventBus().unregister(this);
-        if (bookmarksResult != null)
-            bookmarksResult.removeAllChangeListeners();
         if (event != null && event.isValid())
             event.removeAllChangeListeners();
+    }
+
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        bookMarksListAdapter.clearOnBookmarkSelectedListener();
+    }
+
+    @Override
+    public void showSnackbar(BookmarkStatus bookmarkStatus) {
+        Snackbar snackbar = Snackbar.make(bookmarkHeader, SnackbarUtil.getMessageResource(bookmarkStatus), Snackbar.LENGTH_LONG);
+        SnackbarUtil.setSnackbarAction(getContext(), snackbar, bookmarkStatus)
+                .show();
     }
 }

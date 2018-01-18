@@ -50,6 +50,10 @@
             android:label="@string/title_activity_edit_profile"
             android:configChanges="orientation|screenSize|keyboardHidden"/>
         <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
+        <activity
             android:name=".activities.auth.ChangePasswordActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:label="@string/title_activity_change_password" />
@@ -102,8 +106,7 @@
         <activity
             android:name=".activities.SearchActivity"
             android:launchMode="singleTop"
-            android:label="Search App"
-            android:parentActivityName=".activities.MainActivity">
+            android:label="Search App">
             <intent-filter>
                 <action android:name="android.intent.action.SEARCH" />
             </intent-filter>

@@ -1,6 +1,7 @@
 package org.fossasia.openevent.activities;
 
 import android.app.Dialog;
+import android.app.DialogFragment;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -26,9 +27,7 @@ import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.widget.Toolbar;
-import android.text.Html;
-import android.text.method.LinkMovementMethod;
-import android.view.LayoutInflater;
+import android.text.TextUtils;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
@@ -36,7 +35,6 @@ import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.TextView;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.squareup.otto.Subscribe;
@@ -55,7 +53,6 @@ import org.fossasia.openevent.data.SessionType;
 import org.fossasia.openevent.data.Speaker;
 import org.fossasia.openevent.data.Sponsor;
 import org.fossasia.openevent.data.Track;
-import org.fossasia.openevent.data.extras.Copyright;
 import org.fossasia.openevent.data.extras.SocialLink;
 import org.fossasia.openevent.data.facebook.CommentItem;
 import org.fossasia.openevent.dbutils.RealmDataRepository;
@@ -83,6 +80,8 @@ import org.fossasia.openevent.fragments.ScheduleFragment;
 import org.fossasia.openevent.fragments.SpeakersListFragment;
 import org.fossasia.openevent.fragments.SponsorsFragment;
 import org.fossasia.openevent.fragments.TracksFragment;
+import org.fossasia.openevent.fragments.ZoomableImageDialogFragment;
+import org.fossasia.openevent.modules.OnImageZoomListener;
 import org.fossasia.openevent.utils.AuthUtil;
 import org.fossasia.openevent.utils.CommonTaskLoop;
 import org.fossasia.openevent.utils.ConstantStrings;
@@ -112,7 +111,7 @@ import io.realm.RealmList;
 import io.realm.RealmResults;
 import timber.log.Timber;
 
-public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCallback {
+public class MainActivity extends BaseActivity implements FeedAdapter.OpenCommentsDialogListener, OnImageZoomListener {
 
     private static final String STATE_FRAGMENT = "stateFragment";
     private static final String NAV_ITEM = "navItem";
@@ -195,7 +194,7 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
                 SharedPreferencesUtil.putBoolean(ConstantStrings.IS_DOWNLOAD_DONE, true);
             }
         } else {
-            setupConnection();
+            downloadData();
         }
 
         if (savedInstanceState == null) {
@@ -227,6 +226,20 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
         customTabsSupported = bindService(customTabIntent, customTabsServiceConnection, Context.BIND_AUTO_CREATE);
     }
 
+    private void setUserProfileMenuItem(){
+        MenuItem userProfileMenuItem = navigationView.getMenu().findItem(R.id.nav_user_profile);
+        if (AuthUtil.isUserLoggedIn()) {
+            String email = SharedPreferencesUtil.getString(ConstantStrings.USER_EMAIL, null);
+            String firstName = SharedPreferencesUtil.getString(ConstantStrings.USER_FIRST_NAME, null);
+            String lastName = SharedPreferencesUtil.getString(ConstantStrings.USER_LAST_NAME, null);
+
+            if (!TextUtils.isEmpty(firstName))
+                userProfileMenuItem.setTitle(firstName + " " + lastName);
+            else if (!TextUtils.isEmpty(email))
+                userProfileMenuItem.setTitle(email);
+        }
+    }
+
     @Override
     protected int getLayoutResource() {
         return R.layout.activity_main;
@@ -242,6 +255,7 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
     protected void onResume() {
         super.onResume();
         OpenEventApp.getEventBus().register(this);
+        setUserProfileMenuItem();
     }
 
     @Override
@@ -298,7 +312,6 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
 
             drawerLayout.addDrawerListener(smoothActionBarToggle);
             ab.setDisplayHomeAsUpEnabled(true);
-            ab.setDisplayHomeAsUpEnabled(true);
             smoothActionBarToggle.syncState();
         } else if (toolbar!=null && toolbar.getTitle().equals(getString(R.string.menu_about))) {
             navigationView.setCheckedItem(R.id.nav_home);
@@ -311,13 +324,7 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
             return;
         }
 
-        MenuItem userProfileMenuItem = navigationView.getMenu().findItem(R.id.nav_user_profile);
-        if (AuthUtil.isUserLoggedIn()) {
-            String email = SharedPreferencesUtil.getString(ConstantStrings.USER_EMAIL, null);
-            if (email != null) {
-                userProfileMenuItem.setTitle(email);
-            }
-        }
+        setUserProfileMenuItem();
     }
 
     private void setNavHeader(Event event) {
@@ -417,7 +424,7 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
         }
     }
 
-    private void setupConnection() {
+    public void downloadData() {
         NetworkUtils.checkConnection(new WeakReference<>(this), new NetworkUtils.NetworkStateReceiverListener() {
 
             @Override
@@ -501,6 +508,7 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
         atHome = isAtHome;
 
         fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.fade_in, R.anim.fade_out)
                 .replace(R.id.content_frame, fragment, TAG).commit();
         if (getSupportActionBar() != null) {
             getSupportActionBar().setTitle(title);
@@ -645,12 +653,23 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
     public void showNetworkDialog(ShowNetworkDialogEvent event) {
         completeHandler.hide();
         if (dialogNetworkNotification == null) {
-            dialogNetworkNotification = DialogFactory.createSimpleActionDialog(this,
+            dialogNetworkNotification = DialogFactory.createCancellableSimpleActionDialog(this,
                     R.string.net_unavailable,
                     R.string.turn_on,
-                    (dialog, which) -> {
-                        Intent setNetworkIntent = new Intent(Settings.ACTION_SETTINGS);
-                        startActivity(setNetworkIntent);
+                    R.string.ok,
+                    R.string.cancel,
+                    (dialogInterface, button) -> {
+                        switch (button) {
+                            case DialogInterface.BUTTON_POSITIVE:
+                                Intent setNetworkIntent = new Intent(Settings.ACTION_SETTINGS);
+                                startActivity(setNetworkIntent);
+                                break;
+                            case DialogInterface.BUTTON_NEGATIVE:
+                                dialogNetworkNotification.dismiss();
+                                return;
+                            default:
+                                // No action to be taken
+                        }
                     });
         }
 
@@ -851,11 +870,21 @@ public class MainActivity extends BaseActivity implements FeedAdapter.AdapterCal
     }
 
     @Override
-    public void onMethodCallback(List<CommentItem> commentItems) {
+    public void openCommentsDialog(List<CommentItem> commentItems) {
         CommentsDialogFragment newFragment = new CommentsDialogFragment();
         Bundle bundle = new Bundle();
         bundle.putParcelableArrayList(ConstantStrings.FACEBOOK_COMMENTS, new ArrayList<>(commentItems));
         newFragment.setArguments(bundle);
         newFragment.show(fragmentManager, "Comments");
+    }
+
+    @Override
+    public void onZoom(String imageUri) {
+        ZoomableImageDialogFragment zoomableImageDialogFragment = new ZoomableImageDialogFragment();
+        zoomableImageDialogFragment.setStyle(DialogFragment.STYLE_NO_TITLE, 0);
+        Bundle bundle = new Bundle();
+        bundle.putString(ConstantStrings.IMAGE_ZOOM_KEY, imageUri);
+        zoomableImageDialogFragment.setArguments(bundle);
+        zoomableImageDialogFragment.show(fragmentManager, "ZoomableImage");
     }
 }

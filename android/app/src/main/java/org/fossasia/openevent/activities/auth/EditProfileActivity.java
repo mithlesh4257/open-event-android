@@ -10,6 +10,7 @@ import android.support.design.widget.TextInputEditText;
 import android.support.design.widget.TextInputLayout;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
+import android.text.TextUtils;
 import android.util.Base64;
 import android.view.MenuItem;
 import android.view.View;
@@ -19,6 +20,8 @@ import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
+import com.yalantis.ucrop.UCrop;
+
 import org.fossasia.openevent.OpenEventApp;
 import org.fossasia.openevent.R;
 import org.fossasia.openevent.api.APIClient;
@@ -27,11 +30,14 @@ import org.fossasia.openevent.data.auth.User;
 import org.fossasia.openevent.dbutils.RealmDataRepository;
 import org.fossasia.openevent.utils.AuthUtil;
 import org.fossasia.openevent.utils.CircleTransform;
+import org.fossasia.openevent.utils.ConstantStrings;
 import org.fossasia.openevent.utils.JWTUtils;
+import org.fossasia.openevent.utils.SharedPreferencesUtil;
 import org.fossasia.openevent.utils.Utils;
 import org.json.JSONException;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
 
@@ -130,8 +136,8 @@ public class EditProfileActivity extends AppCompatActivity {
         if (firstNameInput == null || lastNameInput == null)
             return;
 
-        String firstName = firstNameInput.getText().toString();
-        String lastName = lastNameInput.getText().toString();
+        String firstName = firstNameInput.getText().toString().trim();
+        String lastName = lastNameInput.getText().toString().trim();
 
         int id = 0;
         try {
@@ -186,15 +192,16 @@ public class EditProfileActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        if (user == null || firstNameInput == null || lastNameInput == null) {
+
+        String firstName = firstNameInput.getText().toString().trim();
+        String lastName = lastNameInput.getText().toString().trim();
+
+        if (!user.isValid() || TextUtils.isEmpty(firstName) || TextUtils.isEmpty(lastName)) {
             super.onBackPressed();
             return;
         }
 
-        String firstName = firstNameInput.getText().toString();
-        String lastName = lastNameInput.getText().toString();
-
-        if (!user.getFirstName().trim().equals(firstName) || !user.getLastName().trim().equals(lastName) || !Utils.isEmpty(encodedImage)) {
+        if (!firstName.equals(user.getFirstName()) || !lastName.equals(user.getLastName()) || !Utils.isEmpty(encodedImage)) {
             //Show confirmation dialog
             AlertDialog confirmationDialog = new AlertDialog.Builder(this)
                     .setMessage(R.string.edit_profile_confirmation)
@@ -226,10 +233,14 @@ public class EditProfileActivity extends AppCompatActivity {
 
             imageUri = data.getData();
             Timber.d(imageUri.toString());
+            UCrop.of(imageUri,Uri.fromFile(new File(getCacheDir(),imageUri.getUserInfo()+".png"))).start(this);
 
+        }
+        if (resultCode == RESULT_OK && requestCode == UCrop.REQUEST_CROP) {
+            final Uri resultUri = UCrop.getOutput(data);
             InputStream imageStream = null;
             try {
-                imageStream = getContentResolver().openInputStream(imageUri);
+                imageStream = getContentResolver().openInputStream(resultUri);
             } catch (FileNotFoundException e) {
                 e.printStackTrace();
             }
@@ -237,9 +248,12 @@ public class EditProfileActivity extends AppCompatActivity {
             encodedImage = encodeImage(selectedImage);
 
             OpenEventApp.picassoWithCache
-                    .load(imageUri)
+                    .load(resultUri)
                     .transform(new CircleTransform())
                     .into(avatar);
+        } else if (resultCode == UCrop.RESULT_ERROR) {
+            final Throwable cropError = UCrop.getError(data);
+            Timber.d("EditProfileActivity", "UCrop Error" + cropError);
         }
     }
 
@@ -262,8 +276,13 @@ public class EditProfileActivity extends AppCompatActivity {
         String lastName = user.getLastName();
         String avatarUrl = user.getAvatarUrl();
 
-        if (firstName != null)
+        SharedPreferencesUtil.putString(ConstantStrings.USER_FIRST_NAME, user.getFirstName());
+        SharedPreferencesUtil.putString(ConstantStrings.USER_LAST_NAME, user.getLastName());
+
+        if (firstName != null) {
             firstNameInput.setText(firstName.trim());
+            firstNameInput.setSelection(firstName.length());
+        }
         if (lastName != null)
             lastNameInput.setText(lastName.trim());
 
